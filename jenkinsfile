@@ -1,43 +1,42 @@
-pipeline {
-    notify('started')
-    agent any
-  
-    stages {
-        stage ('Compile Stage') {
 
-            steps {
-                withMaven(jdk: 'jdk1.8.0_131', maven: 'maven-3.5.0') {
-                    bat 'mvn clean compile'
-                }
-            }
-        }
-
-        stage ('Testing Stage') {
-
-            steps {
-                withMaven(jdk: 'jdk1.8.0_131', maven: 'maven-3.5.0') {
-                    bat 'mvn test'
-                }
-            }
-        }
-
-
-        stage ('Deployment Stage') {
-            steps {
-                withMaven(jdk: 'jdk1.8.0_131', maven: 'maven-3.5.0') {
-                    bat 'mvn deploy'
-                }
-            }
-        }
+node {
+    def server = Artifactory.server('tejamodukuri.jfrog.io')
+    def buildInfo = Artifactory.newBuildInfo()
+    def rtMaven = Artifactory.newMavenBuild()
+    
+    stage ('Checkout & Build') {
+        git url: 'https://github.com/tejamodukuri/maven-jfrog-deploy.git'
+    }
+ 
+    stage ('Unit Test') {
+        rtMaven.tool = 'Maven-3.5.3' // Tool name from Jenkins configuration
+        rtMaven.run pom: 'pom.xml', goals: 'clean test'
     }
     
-    def notify(status){
-    emailext(
-       to: "manee2k6@gmail.com",
-        subject: "${status}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-        body: """<p> ${status}: Job '${env.JOBE_NAME} [${env.BUILD_NUMBER}]':</p>
-           <p>Check console Output at <a href ='${env.BUILD_URL}'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a></p>
-    )    
+    stage('SonarQube Analysis') {
+        //rtMaven.run pom: 'maven-example/pom.xml', goals: 'clean org.jacoco:jacoco-maven-plugin:prepare-agent package sonar:sonar -Dsonar.host.url=https://sonarcloud.io -Dsonar.organization=pattabhi -Dsonar.login=df5bb81bae9ba310d6a38135b957227ba6ecd32c '
+     
+          
+      }
     
+    stage ('Artifactory configuration') {
+        // Obtain an Artifactory server instance, defined in Jenkins --> Manage..:
+         
+        rtMaven.tool = 'Maven-3.5.3' // Tool name from Jenkins configuration
+        rtMaven.deployer releaseRepo: 'libs-release-local', snapshotRepo: 'libs-snapshot-local', server: server
+        rtMaven.resolver releaseRepo: 'libs-release', snapshotRepo: 'libs-snapshot', server: server
+        rtMaven.deployer.deployArtifacts = false // Disable artifacts deployment during Maven run
+     }
+            
+    stage ('Install') {
+       rtMaven.run pom: 'pom.xml', goals: 'install', buildInfo: buildInfo
+     }
+ 
+    stage ('Deploy') {
+        rtMaven.deployer.deployArtifacts buildInfo
+    }
+        
+    stage ('Publish build info') {
+        server.publishBuildInfo buildInfo
     }
 }
